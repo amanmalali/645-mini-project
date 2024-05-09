@@ -1,6 +1,5 @@
 #Folders to ignore
 
-database.ini
 data/sdss_100k.csv
 data/small_sdss.csv
 .DS_Store
