@@ -124,13 +124,26 @@ def find_n_obj_data(data_x,full_data=None):
     return fixed_ind
 
 def initial_dataset(df,target_labels):
-    labels=[0,0,0,0,0]
-    while np.count_nonzero(np.array(labels))==0 or np.count_nonzero(np.array(labels))==5:
-        start_df=df.drop(['objid'],axis=1)
-        km=run_kmeans(start_df,6)
-        ind=find_n_obj_kmeans(km,start_df,1)
-        labels=target_labels[ind]
-        dataset=df.iloc[ind]
+    initial_indices = []
+    idx = 0
+    count_ones = 0
+    count_zeroes = 0
+    while count_ones < 3 or count_zeroes < 3:
+        if target_labels[idx] == 1 and count_ones < 3:
+            count_ones += 1
+            initial_indices.append(idx)
+        elif count_zeroes < 3:
+            count_zeroes += 1
+            initial_indices.append(idx)
+        idx += 1
+    labels = target_labels[initial_indices]
+    dataset = df.iloc[initial_indices]
+    #while np.count_nonzero(np.array(labels))!=3:
+    #    start_df=df.drop(['objid'],axis=1)
+    #    km=run_kmeans(start_df,6)
+    #    ind=find_n_obj_kmeans(km,start_df,1)
+    #    labels=target_labels[ind]
+    #    dataset=df.iloc[ind]
     return dataset,labels
 
 def iter_dataset(df,df_all,target_labels):
@@ -149,11 +162,43 @@ def iter_dataset(df,df_all,target_labels):
         ind=ind[ind_idx]
     labels=target_labels[ind]
     dataset=df_all.iloc[ind]
+    if len(ind)<20:
+        remaining_samples = 20 - len(ind)
+        regions = get_regions(last_trained_x, last_predicted_y)
+        boundary_df = pd.DataFrame()
+        expanded_dfs = []
+        min_length = None
+        for region in regions:
+            expanded_df = expand_region(region, df_all)
+            if len(expanded_df.index) != 0:
+                expanded_dfs.append(expanded_df)
+                if min_length is None:
+                    min_length = len(expanded_df.index)
+                if min_length > len(expanded_df.index):
+                    min_length = len(expanded_df.index)
+        for expanded_df in expanded_dfs:
+            expanded_df = expanded_df.sample(min_length)
+            boundary_df = pd.concat([boundary_df, expanded_df])
+        if len(boundary_df.index) > remaining_samples:
+            boundary_df = boundary_df.sample(remaining_samples)
+        dataset = pd.concat([dataset, boundary_df])
+        if len(dataset.index) < 20:
+            remaining_samples = 20 - len(dataset.index)
+            dataset = pd.concat([dataset, df_all.sample(remaining_samples)])
+        ind = dataset.index
+        labels = target_labels[ind]
     return dataset,labels
+
+last_trained_x = pd.DataFrame()
+last_predicted_y = []
 
 def fit_dc(train_x,train_y):
     dc=DecisionTreeClassifier()
     dc.fit(train_x,train_y)
+    global last_trained_x
+    global last_predicted_y
+    last_trained_x = train_x
+    last_predicted_y = dc.predict(train_x)
     return dc
 
 
@@ -161,7 +206,81 @@ def get_metrics(target_labels,pred_labels):
     return f1_score(target_labels,pred_labels)
 
 
-user_query="select * from skyphoto where colc > 25 and colc < 30;"
+def get_regions(training_data = last_trained_x, predicted_labels = last_predicted_y):
+    negative_example_indices = []
+    positive_example_indices = []
+    for idx in range(len(predicted_labels)):
+        if predicted_labels[idx] == 0:
+            negative_example_indices.append(idx)
+        if predicted_labels[idx] == 1:
+            positive_example_indices.append(idx)
+    negative_examples = training_data.iloc[negative_example_indices]
+    positive_examples = training_data.iloc[positive_example_indices]
+    features = [col for col in positive_examples.columns]
+    region = dict()
+    for feature in features:
+        region[feature] = (positive_examples[feature].min(),
+                           positive_examples[feature].max())
+    split_point = None
+    for feature in features:
+        min_bound, max_bound = region[feature]
+        for idx, negative_example in negative_examples.iterrows():
+            if negative_example[feature] >= min_bound and \
+                negative_example[feature] <= max_bound:
+                split_point = negative_example
+                break
+        if split_point is not None:
+            break
+    if split_point is None:
+        return [region]
+    groups = []
+    for bitmask in range(1<<(len(features))):
+        filtered_df = positive_examples
+        for i in range(len(features)):
+            if len(filtered_df.index) == 0:
+                break
+            if (bitmask & (1<<i)) != 0:
+                filtered_df = filtered_df[(filtered_df[features[i]] < split_point[features[i]])]
+            else:
+                filtered_df = filtered_df[(filtered_df[features[i]] > split_point[features[i]])]
+        if len(filtered_df.index) != 0:
+            groups.append(filtered_df)
+
+    regions = []
+    for group in groups:
+        group_training_x = pd.concat([group, negative_examples])
+        group_predicted_labels = []
+        for _ in range(len(group.index)):
+            group_predicted_labels.append(1)
+        for _ in range(len(negative_examples.index)):
+            group_predicted_labels.append(0)
+        sub_regions = get_regions(group_training_x, group_predicted_labels)
+        for region in sub_regions:
+            regions.append(region)
+    return regions
+
+
+def expand_region(region, df):
+    x = 1
+    features = list(region.keys())
+    for bitmask in range(1<<len(features)):
+        filtered_df = df
+        for i in range(len(features)):
+            if len(filtered_df.index) == 0:
+                break
+            min_bound, max_bound = region[features[i]]
+            if (bitmask & (1<<i)) != 0:
+                filtered_df = filtered_df[((filtered_df[features[i]] >= (min_bound - x)) & 
+                                           (filtered_df[features[i]] <= (min_bound + x))) |
+                                          ((filtered_df[features[i]] >= (max_bound - x)) &
+                                           (filtered_df[features[i]] <= (max_bound + x)))]
+            else:
+                filtered_df = filtered_df[((filtered_df[features[i]] >= min_bound) &
+                                           (filtered_df[features[i]] <= max_bound))]
+    return filtered_df
+
+
+user_query="select * from skyphoto where colc >= 25 and colc <= 28;"
 
 # target_df=utils.run_query_to_df(user_query)
 # target_objs=target_df['objid'].values
@@ -179,9 +298,9 @@ dataset,labels=initial_dataset(df,target_labels)
 train_x=dataset.drop(['objid'],axis=1)
 dc=fit_dc(train_x,labels)
 
-sample=20
+number_of_samples=20
 
-training_x=df.sample(sample)
+training_x=df.sample(number_of_samples)
 idx=training_x.index
 training_y=target_labels[idx]
 pred_labels=dc.predict(training_x.drop(['objid'],axis=1))
@@ -189,11 +308,11 @@ pred_labels=dc.predict(training_x.drop(['objid'],axis=1))
 print("Score :",get_metrics(training_y,pred_labels))
 dataset=pd.concat([dataset,training_x])
 labels=np.concatenate((labels,training_y))
-for i in range(20):
+score = 0.0
+while score <= 0.95:
     unq = np.array([x + 2*y for x, y in zip(pred_labels, labels)])
     fn = np.array(np.where(unq == 2)).tolist()[0]
     fp = np.array(np.where(unq == 1)).tolist()[0]
-
     fn_fp=fn+fp
     new_dataset=dataset.iloc[fn_fp]
     new_labels=labels[fn_fp]
@@ -203,7 +322,29 @@ for i in range(20):
     # if len(new_dataset)<6:
     #     break
     if len(new_dataset)==0:
-        training_x=df.sample(sample)
+        regions = get_regions(last_trained_x, last_predicted_y)
+        boundary_df = pd.DataFrame()
+        expanded_dfs = []
+        min_length = None
+        for region in regions:
+            expanded_df = expand_region(region, df)
+            if len(expanded_df.index) != 0:
+                expanded_dfs.append(expanded_df)
+                if min_length is None:
+                    min_length = len(expanded_df.index)
+                if min_length > len(expanded_df.index):
+                    min_length = len(expanded_df.index)
+        for expanded_df in expanded_dfs:
+            expanded_df = expanded_df.sample(min_length)
+            boundary_df = pd.concat([boundary_df, expanded_df])
+
+        if len(boundary_df.index) > number_of_samples:
+            training_x = boundary_df.sample(number_of_samples)
+        else:
+            training_x = boundary_df
+        if len(training_x.index) < number_of_samples:
+            remaining_samples = number_of_samples - len(training_x.index)
+            training_x= pd.concat([training_x, df.sample(remaining_samples)])
         idx=training_x.index
         training_y=target_labels[idx]
         dataset=pd.concat([dataset,training_x])
@@ -241,7 +382,5 @@ for i in range(20):
 
     pred_labels=dc.predict(dataset.drop(['objid'],axis=1))
 
-    if score==1:
-        break
     # pred_labels=np.array(pred_labels)
     # print(np.unique(pred_labels,return_counts=True))

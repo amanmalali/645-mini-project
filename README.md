@@ -21,7 +21,7 @@ password=admin
 ```
 
 ### Packages required
-1. Scickit-learn
+1. scikit-learn
 2. Numpy
 3. Pandas
 4. Psycopg2
@@ -29,4 +29,10 @@ password=admin
 
 ## Running the experiment
 
-1. Run main.py
+1. To run AIDE, use
+ 
+python main.py
+
+2. To run the random exploration baseline, use
+
+python main_baseline.py

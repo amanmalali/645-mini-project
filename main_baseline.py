@@ -124,13 +124,26 @@ def find_n_obj_data(data_x,full_data=None):
     return fixed_ind
 
 def initial_dataset(df,target_labels):
-    labels=[0,0,0,0,0]
-    while np.count_nonzero(np.array(labels))==0 or np.count_nonzero(np.array(labels))==5:
-        start_df=df.drop(['objid'],axis=1)
-        km=run_kmeans(start_df,6)
-        ind=find_n_obj_kmeans(km,start_df,1)
-        labels=target_labels[ind]
-        dataset=df.iloc[ind]
+    initial_indices = []
+    idx = 0
+    count_ones = 0
+    count_zeroes = 0
+    while count_ones < 3 or count_zeroes < 3:
+        if target_labels[idx] == 1 and count_ones < 3:
+            count_ones += 1
+            initial_indices.append(idx)
+        elif count_zeroes < 3:
+            count_zeroes += 1
+            initial_indices.append(idx)
+        idx += 1
+    labels = target_labels[initial_indices]
+    dataset = df.iloc[initial_indices]
+    #while np.count_nonzero(np.array(labels))!=3:
+    #    start_df=df.drop(['objid'],axis=1)
+    #    km=run_kmeans(start_df,6)
+    #    ind=find_n_obj_kmeans(km,start_df,1)
+    #    labels=target_labels[ind]
+    #    dataset=df.iloc[ind]
     return dataset,labels
 
 def iter_dataset(df,df_all,target_labels):
@@ -187,7 +200,8 @@ labels=target_labels[idx]
 dc=fit_dc(dataset.drop(['objid'],axis=1),labels)
 pred_labels=dc.predict(start_df)
 print("Score :",get_metrics(target_labels,pred_labels))
-for i in range(20):
+score = get_metrics(target_labels,pred_labels)
+while score <= 0.95:
     new_dataset=df.sample(sample)
     idx=new_dataset.index
     new_labels=target_labels[idx]
