@@ -146,6 +146,8 @@ def initial_dataset(df,target_labels):
     #    dataset=df.iloc[ind]
     return dataset,labels
 
+boundary_exploitation_cap = 5
+
 def iter_dataset(df,df_all,target_labels):
     labels=[0]
     # while np.count_nonzero(np.array(labels))==0:
@@ -181,6 +183,9 @@ def iter_dataset(df,df_all,target_labels):
             boundary_df = pd.concat([boundary_df, expanded_df])
         if len(boundary_df.index) > remaining_samples:
             boundary_df = boundary_df.sample(remaining_samples)
+        global boundary_exploitation_cap
+        if len(boundary_df.index) > boundary_exploitation_cap:
+            boundary_df = boundary_df.sample(int(boundary_exploitation_cap))
         dataset = pd.concat([dataset, boundary_df])
         if len(dataset.index) < 20:
             remaining_samples = 20 - len(dataset.index)
@@ -261,8 +266,9 @@ def get_regions(training_data = last_trained_x, predicted_labels = last_predicte
 
 
 def expand_region(region, df):
-    x = 1
-    features = list(region.keys())
+    x = 3
+    #features = list(region.keys())
+    features = ['colc']
     for bitmask in range(1<<len(features)):
         filtered_df = df
         for i in range(len(features)):
@@ -309,6 +315,7 @@ print("Score :",get_metrics(training_y,pred_labels))
 dataset=pd.concat([dataset,training_x])
 labels=np.concatenate((labels,training_y))
 score = 0.0
+last_score = 0.0
 while score <= 0.95:
     unq = np.array([x + 2*y for x, y in zip(pred_labels, labels)])
     fn = np.array(np.where(unq == 2)).tolist()[0]
@@ -339,9 +346,10 @@ while score <= 0.95:
             boundary_df = pd.concat([boundary_df, expanded_df])
 
         if len(boundary_df.index) > number_of_samples:
-            training_x = boundary_df.sample(number_of_samples)
-        else:
-            training_x = boundary_df
+            boundary_df = boundary_df.sample(number_of_samples)
+        if len(boundary_df.index) > boundary_exploitation_cap:
+            boundary_df = boundary_df.sample(int(boundary_exploitation_cap))
+        training_x = boundary_df
         if len(training_x.index) < number_of_samples:
             remaining_samples = number_of_samples - len(training_x.index)
             training_x= pd.concat([training_x, df.sample(remaining_samples)])
@@ -381,6 +389,10 @@ while score <= 0.95:
     print("Score on full dataset:",score)
 
     pred_labels=dc.predict(dataset.drop(['objid'],axis=1))
+    boundary_exploitation_cap += 0.1
+    if score - last_score < 0.01:
+        boundary_exploitation_cap -= 1
+    last_score = score
 
     # pred_labels=np.array(pred_labels)
     # print(np.unique(pred_labels,return_counts=True))

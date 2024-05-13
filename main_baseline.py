@@ -174,7 +174,7 @@ def get_metrics(target_labels,pred_labels):
     return f1_score(target_labels,pred_labels)
 
 
-user_query="select * from skyphoto where colc > 25 and colc < 30;"
+user_query="select * from skyphoto where colc >= 25 and colc <= 28;"
 
 # target_df=utils.run_query_to_df(user_query)
 # target_objs=target_df['objid'].values
